@@ -1,5 +1,5 @@
-import type { ConversationModel, ConversationOutcome, HistoryEntry, ModelCategory } from "./conversation-model.js";
-import { decideAttention } from "./attention-filter.js";
+import type { ConversationModel, ConversationOutcome, HistoryEntry, ModelCategory, ModelIntent } from "./conversation-model.js";
+import { decideAttention, socialOf } from "./attention-filter.js";
 import { ANSWER_TEXTS, answerFromKnowledge, detectTopics, type AnswerOptions } from "./knowledge-answers.js";
 import { looksAutomated, looksLikeOwnReply, replySignature } from "./reply-guard.js";
 import { fold, plain, words } from "./text-normalize.js";
@@ -15,7 +15,7 @@ import type { IncomingTurn, TurnHandlerContext, TurnReply } from "./turns.js";
 export type TextCategory = "MEDICAL" | "HUMAN_REQUEST" | "INFO_REQUEST" | "RECIPE_OR_QUOTE" | "GREETING" | "OTHER";
 export type HandoffReason = "HUMAN_REQUEST" | "INFO_REQUEST" | "MEDICAL";
 
-const WINDOW = 4000;
+const WINDOW = 8000;
 // Palabras de precio: un mensaje que las lleva es un pedido de cotización aunque también pregunte por el plazo o la muestra (G4.1).
 // «cuánto sería todo», «cuánto me sale», «cuánto es en total» (G6.0: referencias a lo ya anotado).
 const HOW_MUCH = "cuanto (me |nos |te )?(sale|salen|saldria|saldrian|es|seria|serian|sera|vale|valen|valdria|cobran|cobrarian|costaria|costarian)";
@@ -50,9 +50,26 @@ export function classifyText(text: string): TextCategory {
   if (INFO.test(clipped)) return "INFO_REQUEST";
   if (RECIPE.test(clipped)) return "RECIPE_OR_QUOTE";
   const tokens = words(clipped);
-  if (tokens.length > 0 && tokens.length <= 5 && tokens.every((token) => GREETING_WORDS.has(token))) return "GREETING";
-  // Un mensaje más largo que lo que se examina y sin nada reconocible en ese tramo necesita a una persona.
-  return text.length > WINDOW ? "HUMAN_REQUEST" : "OTHER";
+  if (tokens.length > 0 && tokens.length <= 10 && tokens.every((token) => GREETING_WORDS.has(token))) return "GREETING";
+  // Un mensaje sin intención reconocible no se fuerza a una persona: queda en OTHER para que el manejador lo resuelva con el texto fijo o el modelo, sin bloquear al paciente.
+  return "OTHER";
+}
+
+function intentToTextCategory(intent: ModelIntent): TextCategory {
+  switch (intent) {
+    case "MEDICAL": return "MEDICAL";
+    case "HUMAN_REQUEST": return "HUMAN_REQUEST";
+    case "INFO_REQUEST": return "INFO_REQUEST";
+    case "BUSINESS_INFO": return "INFO_REQUEST";
+    case "QUOTE_REQUEST": return "RECIPE_OR_QUOTE";
+    case "GREETING": return "GREETING";
+    case "THANKS":
+    case "SMALL_TALK":
+    case "HOW_IT_WORKS":
+    case "UNCLEAR":
+    case "OFF_TOPIC":
+      return "OTHER";
+  }
 }
 
 // ───────────────────────────── textos ─────────────────────────────
@@ -278,7 +295,60 @@ export function createTextHandler(options: TextHandlerOptions): (turn: IncomingT
       options.log("text_turn", { category: "AUTOMATED", handoff: "none" });
       return undefined;
     }
+
+    // 1. Filtro de seguridad determinista: lo médico, pedir a una persona y la información con palabras de laboratorio
+    //    NUNCA llegan al modelo. Van directo al camino determinista.
     const category = classifyText(turn.text);
+    if (category === "MEDICAL" || category === "HUMAN_REQUEST") {
+      if (options.attention) {
+        const decision = decideAttention(turn.text, category);
+        if (decision.action === "IGNORE") {
+          options.log("attention_filter", { action: "IGNORE", reason: decision.reason, category });
+          return undefined;
+        }
+      }
+      return route(turn, category, context, true);
+    }
+
+    // 2. Para lo no crítico (mensajes sin clasificar y cotización sin foto), el modelo de OpenAI clasifica
+    //    primero: devuelve intención + datos importantes; esa intención activa el flujo correcto.
+    //    QUOTE_REQUEST -> cotización, INFO_REQUEST -> información, MEDICAL/HUMAN_REQUEST -> retoma camino determinista,
+    //    THANKS/SMALL_TALK/HOW_IT_WORKS/OFF_TOPIC -> saludo u otro.
+    //    Las preguntas con palabras de precio o temas clínicos NUNCA llegan al modelo.
+    if (options.conversation && (category === "OTHER" || category === "RECIPE_OR_QUOTE")) {
+      // Los mensajes sociales (saludo, cortesía, ruido) no consultan al modelo: el filtro de atención los maneja.
+      if (socialOf(turn.text)) {
+        options.log("text_turn", { category, handoff: "none", model: "social_blocked" });
+      } else {
+        const clipped = plain((turn.text ?? "").slice(0, WINDOW));
+        const isPriceOrClinical = PRICE_WORDS.test(clipped) || touchesClinicalTopics(turn.text ?? "");
+        if (!isPriceOrClinical) {
+          const outcome = await askModel(turn, category, context);
+          if (outcome?.status === "REPLY") {
+            const modelCategory = intentToTextCategory(outcome.intent);
+            // Si el modelo clasifica como médico, persona o información, se retoma el camino determinista (su texto se descarta).
+            if (modelCategory === "MEDICAL" || modelCategory === "HUMAN_REQUEST" || modelCategory === "INFO_REQUEST") {
+              return route(turn, modelCategory, context, false);
+            }
+            options.log("text_turn", { category: modelCategory, handoff: "none", model: "reply", intent: outcome.intent });
+            return fromModel(outcome, modelCategory);
+          }
+          if (outcome?.status === "REROUTE") {
+            options.log("text_turn", { category: outcome.category, handoff: "none", model: "reroute" });
+            return route(turn, outcome.category, context, false);
+          }
+          if (outcome?.status === "SILENT") {
+            options.log("text_turn", { category: "OTHER", handoff: "none", model: "silent" });
+            return undefined;
+          }
+          // FALLBACK o undefined: cae al clasificador determinista de regex (comportamiento anterior).
+          options.log("text_turn", { category, handoff: "none", model: "fallback" });
+        } else {
+          options.log("text_turn", { category, handoff: "none", model: "blocked_price_or_clinical" });
+        }
+      }
+    }
+
     if (options.attention) {
       const decision = decideAttention(turn.text, category);
       if (decision.action === "IGNORE") {

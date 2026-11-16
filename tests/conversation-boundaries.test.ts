@@ -28,7 +28,7 @@ describe("G5.3: dónde puede aparecer la conversación con modelo", () => {
       expect(source(path), rel(path)).not.toMatch(MENTION);
     }
     // el manejador de texto solo importa TIPOS de la capa: no depende de ella ni del proveedor en tiempo de ejecución
-    expect(source(join(root, "src/text-handler.ts"))).toMatch(/^import type \{ ConversationModel, ConversationOutcome, HistoryEntry, ModelCategory \} from "\.\/conversation-model\.js";$/m);
+    expect(source(join(root, "src/text-handler.ts"))).toMatch(/^import type \{ ConversationModel, ConversationOutcome, HistoryEntry, ModelCategory, ModelIntent \} from "\.\/conversation-model\.js";$/m);
     expect(importsOf(join(root, "src/text-handler.ts")).filter((imported) => /conversation|openai/i.test(imported))).toEqual(["./conversation-model.js"]);
   });
 });

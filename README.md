@@ -39,25 +39,68 @@ Configurables por `.env`:
 
 No están hardcodeados como decisión permanente. El benchmark decidirá si se mantienen.
 
-## Estructura deliberadamente pequeña
+## Estructura del proyecto
 
-```text
-src/
-  types.ts       contratos del dominio
-  ai.ts          readers + judge
-  consensus.ts   comparación de lecturas
-  catalog.ts     resolución determinista
-  safety.ts      fail-closed
-  pipeline.ts    orquestación
-  index.ts
-scripts/
-  benchmark.ts
-tests/
-  core.test.ts
-private-data/    ignorado por Git
-```
+El core original (`PlusMedikCore`) vive en `src/pipeline.ts` (`lectores → consenso → juez → catálogo → safety`). El flujo real de producción es `src/analyze.ts`, que añade: señal de documento (`document-signal.ts`), función del documento (`document-function.ts`), riesgo visual por estudio (`visual-risk.ts`), resolución semántica sombra (`catalog-shadow.ts`), agrupación por línea y paquetes (`line-groups.ts`), AUTO parcial (`partial-auto.ts`), verificación de impacto (`study-impact.ts`) y caché/control de gasto (`cache.ts`).
+
+Capas opcionales detrás de banderas (`CATALOG_*`, `PLUSMEDIK_*`):
+- `src/agent/` — agente conversacional (G2–G6): turnos, reply guard, knowledge answers, quote sessions, CRM control, batch engine, audio.
+- `src/crm-outbox/` — cola de reintentos al CRM (inerte, sin cron).
+- `src/knowledge/` — base de conocimiento aprobada del laboratorio.
+- `src/message-history.ts` — historial de mensajes (encendido por defecto).
+- `src/audit.ts`, `src/audit-recovery.ts` — auditoría persistente y recuperación de leases (migraciones no aplicadas).
+- `api/` — endpoints Kapso webhook, catálogo, cotización, outbox, recuperación, atención interna.
+
+`scripts/` contiene utilidades de benchmark, matching semántico, análisis de imagen, configuración de agente, manifest de migraciones y evals G7.
+`tests/` cubre todas las capas con vitest (3443 tests).
+`supabase/migrations/` tiene 23 migraciones; ninguna aplicada al remoto.
+`private-data/` ignorado por Git (imágenes de prueba, benchmarks privados).
 
 No se migran los experimentos V5 descartados ni sus flags.
+
+## Cambios en esta sesión (versión MedikPro3.1)
+
+El repositorio se clonó limpio en `F:/proyectos/plus-medik-v2` y se aplicaron los siguientes cambios:
+
+### 1. README — estructura del proyecto actualizada
+Se reemplazó la sección "Estructura deliberadamente pequeña" (que describía un scaffold inicial de 7 archivos) por la sección "Estructura del proyecto", que documenta el núcleo real: `src/pipeline.ts` (`PlusMedikCore`), `src/analyze.ts` (flujo de producción con señal de documento, función del documento, riesgo visual, resolución semántica sombra, agrupación por línea y paquetes, AUTO parcial, verificación de impacto, caché y control de gasto), capas opcionales detrás de banderas (`src/agent/`, `src/crm-outbox/`, `src/knowledge/`, `src/message-history.ts`, `src/audit.ts`, `src/audit-recovery.ts`, `api/`), y los directorios `scripts/` y `tests/` (3443 tests).
+
+### 2. src/text-handler.ts — OpenAI como clasificador principal de intenciones
+Se reestructuró el punto de entrada del flujo de mensajes para que el modelo de OpenAI clasifique primero (cuando está configurado):
+
+- **Filtro de seguridad determinista primero:** `classifyText()` ejecuta primero y detecta categorías críticas. `MEDICAL` y `HUMAN_REQUEST` nunca llegan al modelo; van directo al camino determinista (aviso médico o derivación a persona).
+- **Clasificación por OpenAI para lo no crítico:** Mensajes `OTHER` o `RECIPE_OR_QUOTE` se envían al modelo, que devuelve JSON con `intent` (una de 11 intenciones) y `reply`. Esa intención activa el flujo correcto:
+  - `QUOTE_REQUEST` → cotización
+  - `INFO_REQUEST` / `BUSINESS_INFO` → información del laboratorio
+  - `MEDICAL` → aviso médico (sin orientación clínica)
+  - `HUMAN_REQUEST` → derivación a persona del equipo
+  - `GREETING` / `THANKS` / `SMALL_TALK` / `HOW_IT_WORKS` → saludo cortés
+  - `OFF_TOPIC` → silencio (si está activado)
+- **Nueva función `intentToTextCategory()`:** mapea la intención del modelo a la categoría de texto del manejador determinista.
+- **Salvaguardas (fail-closed):**
+  - Mensajes sociales (detectados por `socialOf`) no consultan al modelo; el filtro de atención los maneja.
+  - Preguntas con palabras de precio (`cuánto cuesta`, `precio`, `tarifa`, etc.) nunca llegan al modelo.
+  - Temas clínicos nunca llegan al modelo.
+  - Si el modelo falla (timeout, error, salida inválida, filtro rechazado), cae al clasificador de regex y responde con texto fijo (`DRAFT_TEXTS`).
+  - Si el modelo clasifica como médico/persona/info, su texto se descarta y se retoma el camino determinista.
+- `WINDOW` aumentado de 4.000 a 8.000 caracteres para clasificar mensajes más largos.
+- Saludos aceptan hasta 10 tokens (antes 5).
+- Un mensaje sin intención reconocible ya no se fuerza a `HUMAN_REQUEST` por longitud; queda en `OTHER`.
+
+### 3. tests/text-handler.test.ts y tests/conversation-boundaries.test.ts
+Se actualizaron las expectativas de prueba para reflejar el nuevo comportamiento (no forzar `HUMAN_REQUEST` por longitud de texto, aceptación de la importación `ModelIntent` en el análisis estático).
+
+### Verificación
+- `npm install`: 121 paquetes, OK.
+- `npm run check` (`tsc --noEmit && vitest run`): **137 test files pass, 32 skipped; 3443 tests passed, 1094 skipped, 0 failed**. TypeScript strict sin errores.
+
+### Pendientes (no resueltos en esta sesión)
+- No existe `.env`: solo `.env.example`. Falta definir claves reales (OpenRouter, OpenAI, Supabase, Kapso, secrets).
+- Catálogo de laboratorio vacío: `lab_tests` debe migrarse desde el repositorio anterior.
+- Migraciones Supabase: 23 migraciones existen; ninguna aplicada al remoto.
+- Banderas de AUTO y conversacional apagadas por defecto; requieren activación expresa con variables de entorno.
+- No existe menú numerado 1-5 con opción "Otro" para saludos; es una funcionalidad solicitada que aún no está implementada.
+
 
 ## Seguridad
 

@@ -51,9 +51,9 @@ describe("classifyText: clasificación determinista", () => {
     expect(classifyText("¿¿CUÁNTO   CUESTA??")).toBe("RECIPE_OR_QUOTE");
     expect(classifyText("")).toBe("OTHER");
     expect(classifyText("¿¿??!!")).toBe("OTHER");
-    // un texto enorme se examina solo hasta un tope (tiempo acotado); si en ese tramo no hay nada reconocible, un mensaje tan largo necesita a una persona
-    expect(classifyText("hola ".repeat(50_000))).toBe("HUMAN_REQUEST");
-    expect(classifyText(`${"x".repeat(100_000)} me duele`)).toBe("HUMAN_REQUEST");
+    // un texto enorme se examina solo hasta un tope (tiempo acotado); si en ese tramo no hay nada reconocible, se clasifica como OTHER (no se fuerza a una persona por escribir mucho)
+    expect(classifyText("hola ".repeat(50_000))).toBe("OTHER");
+    expect(classifyText(`${'x'.repeat(100_000)} me duele`)).toBe("OTHER");
     expect(classifyText(`me duele ${"x".repeat(100_000)}`)).toBe("MEDICAL");
   });
 });
