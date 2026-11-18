@@ -27,7 +27,7 @@ export const asksForPrice = (text: string): boolean => PRICE_WORDS.test(plain(te
 // y la información gana a cotizar. Ante la duda el mensaje va a la rama que NO inventa una respuesta.
 const MEDICAL = /\b(dolor\w*|duele\w*|fiebre\w*|sintoma\w*|mareo\w*|vomit\w*|sangr(?:a|o)\w*|(?:con|hay|tengo|veo|boto|botando|echo|echando|expulso|expulsando) sangre|medicament\w*|medicina\w*|pastilla\w*|dosis|diagnostic\w*|interpret\w*|enferm\w*|emergencia\w*|urgencia\w*|urgente\w*|embaraz\w*|diabet\w*|hipertens\w*|infeccion\w*|alergi\w*)\b/;
 const HUMAN = /\b(persona|personas|humano|humana|asesor\w*|agente|recepcion\w*|operador\w*|ejecutiv\w*|encargad\w*|hablar con|comunicar\w* con|comunicame|llamenme|llamame|llamen me|llamada\w*)\b/;
-const INFO = /\b(horario\w*|abren|abre|cierran|atienden|atencion|direccion\w*|ubicaci\w*|ubicad\w*|donde (esta|estan|queda|quedan|los encuentro)|sucursal\w*|pago\w*|pagar|pagamos|tarjeta\w*|qr|transferencia\w*|factura\w*|ayuno\w*|preparaci\w*|prepararme|domicilio\w*|resultado\w*|convenio\w*|seguro\w*|promocion\w*|descuento\w*|feriado\w*|sabado\w*|domingo\w*|requisito\w*)\b/;
+const INFO = /\b(horario\w*|abren|abre|cierran|atienden|atencion|direccion\w*|ubicaci\w*|ubicad\w*|ubican\w*|donde (esta|estan|queda|quedan|los encuentro|se ubican)|sucursal\w*|pago\w*|pagar|pagamos|tarjeta\w*|qr|transferencia\w*|factura\w*|ayuno\w*|preparaci\w*|prepararme|domicilio\w*|resultado\w*|convenio\w*|seguro\w*|promocion\w*|descuento\w*|feriado\w*|sabado\w*|domingo\w*|requisito\w*)\b/;
 const RECIPE = /\b(cotiz\w*|receta\w*|precio\w*|cuanto (cuesta|cuestan|sale|salen|es|vale|valen|cobran)|costo\w*|tarifa\w*|presupuesto\w*|orden medica|estudio\w*|analisis|examen\w*|laboratorio)\b/;
 const GREETING_WORDS = new Set(["hola", "holaa", "buenas", "buenos", "buen", "dias", "dia", "tardes", "noches", "hey", "saludos", "que", "tal", "como", "estas", "estan", "estan", "doctor", "doctora", "amigos"]);
 
@@ -95,7 +95,7 @@ export const DRAFT_TEXTS: ConversationTexts = {
   handoff_confirmed: "Recibimos tu solicitud. Una persona del equipo la revisará y te escribirá por este chat.",
   handoff_unavailable: "Recibimos tu consulta. Un asesor la revisará y te atenderá lo antes posible por este chat.",
   medical_unavailable: "Recibimos tu mensaje. No puedo darte orientación médica por este chat. Si es una urgencia, comunícate con los servicios de emergencia de tu localidad.",
-  medical_handoff_confirmed: "Recibimos tu mensaje. No puedo darte orientación médica por este chat. Si es una urgencia, comunícate con los servicios de emergencia de tu localidad. Una persona del equipo revisará tu mensaje y te escribirá por este chat."
+  medical_handoff_confirmed: "Recibimos tu mensaje. No puedo darte orientación médica por este chat. Si es una urgencia, comunícate con los servicios de emergencia de tu localidad. Una persona del equipo revisará tu mensaje y te escribirá por este chat.",
 };
 
 export class UnsafeTextError extends Error {

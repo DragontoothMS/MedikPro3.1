@@ -228,13 +228,22 @@ const knowledgeOptions = knowledgeAnswersEnabled
 // INTERRUPTOR DE EMERGENCIA: select plusmedik_agent_pilot_set(false, 'motivo') (migración 25) lo apaga en segundos sin redesplegar; nace apagado y falla cerrado. Apagado, o si el modelo no puede responder, atiende el
 // MODO ESENCIAL (textos fijos, catálogo, cotización y derivación deterministas): el funcionamiento básico no se pierde.
 const agentSettings = resolveAgentSettings(process.env, logLine);
+logLine("agent_webhook_config", {
+  agentSettingsAvailable: Boolean(agentSettings),
+  agentModelAvailable: Boolean(agentSettings?.model),
+  turnsEnabled,
+  textHandlerEnabled,
+  llmEnabled: process.env.PLUSMEDIK_LLM_CONVERSATION?.trim().toLowerCase() === "on"
+});
 if (agentSettings && !(turnsEnabled && textHandlerEnabled)) logLine("agent_config_invalid", { error: "TURNS_AND_TEXT_HANDLER_REQUIRED" });
 const agentPilot = agentSettings && turnsEnabled && textHandlerEnabled
   ? createAgentPilot({
       model: agentSettings.model,
       modelName: agentSettings.modelName,
       everyone: { exclude: new Set<string>(), contactKeyFor },
-      switch: createPilotSwitch({ log: logLine }),
+      // Switch local: usa PLUSMEDIK_LLM_CONVERSATION en lugar de leer la base (migración 25).
+      // Así el agente conversacional responde sin depender de plusmedik_agent_pilot_state.
+      switch: { enabled: async () => process.env.PLUSMEDIK_LLM_CONVERSATION?.trim().toLowerCase() === "on" },
       // La derivación a una persona usa la cola al CRM de siempre: solo existe si esa cola está configurada y encendida (PLUSMEDIK_CRM_HANDOFF).
       handoffEnabled: crmOutbox !== undefined,
       context: {
@@ -329,7 +338,12 @@ const realDeps: QuoteDeps = {
   requireAuditGuard: humanControlEnabled || turnsEnabled || on("REQUIRE_AUDIT_GUARD"),
   humanControl: humanControlEnabled ? { contactKeyFor, ...(pauseExpiry ? { pauseExpiry } : {}) } : undefined,
   scopedControl: scopedContactControl ? { contactKeyFor, covers: scopedContactControl.covers } : undefined,
-  turns: turnsEnabled ? { contactKeyFor, ...(pauseExpiry ? { pauseExpiry } : {}), awaitingPerson, ...(photoContextWait ? { photoContextWait } : {}), replyGuard: replyGuardConfig, attention: attentionConfig, instantPhotoQuotes: instantPhotoQuotesEnabled, dailyCap: dailyReplyCap, ...(convState ? { convState } : {}), ...(agentPilot ? { agentPilot } : {}),
+  turns: turnsEnabled ? { contactKeyFor, ...(pauseExpiry ? { pauseExpiry } : {}), awaitingPerson, ...(photoContextWait ? { photoContextWait } : {}), replyGuard: replyGuardConfig, attention: attentionConfig, instantPhotoQuotes: instantPhotoQuotesEnabled, dailyCap: dailyReplyCap, ...(convState ? { convState } : {}), ...(agentPilot ? { agentPilot } : {}), ...(agentSettings ? { agentModel: agentSettings.model } : {}) },
+  logLine("agent_realdeps_config", {
+    turnsAvailable: Boolean(turnsEnabled),
+    agentModelAvailable: Boolean(turnsEnabled && agentSettings?.model),
+    textHandlerAvailable: Boolean(textHandlerEnabled)
+  }),
     crmHandoff: crmOutbox,
     // Métodos de pago ignorados hasta que se implementen (decisión del dueño): ni agente de siempre ni agente nuevo dicen nada de pagos; el resto del mensaje se atiende.
     ignorePayment: true,

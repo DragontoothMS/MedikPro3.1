@@ -38,8 +38,11 @@
 | `unreadable_image` | Imagen ilegible. | No pude leer esa imagen. Envíala de nuevo como foto, clara y completa. | |
 | `identified_so_far` | Encabezado de la lista de estudios anotados (los nombres salen del catálogo). | Estudios anotados: | |
 | `confirm_done` | Pregunta si eso es todo, tras anotar estudios escritos sin pedir cotizar. «SÍ» o «LISTO» cotiza. | ¿Eso es todo? Responde SÍ y te paso la cotización, o envíame los estudios que falten. | |
-| `ask_option_intro` | Introduce las opciones numeradas cuando un nombre corresponde a varios estudios del catálogo. | Para uno de los estudios tengo varias opciones: | |
-| `ask_option_outro` | Indica cómo elegir una opción (número o nombre exacto). | Responde con el número o escribe el nombre exacto del estudio. | |
+| `ask_option_intro` | Introduce las opciones numeradas cuando un nombre corresponde a varios estudios del catálogo. | Tengo estas opciones: | |
+| `option_intro_others` | — | Ya tengo anotados tus otros estudios. Para este tengo varias opciones: | |
+| `option_intro_more` | — | Ya tengo anotados varios de tus estudios, pero tengo dudas en algunos. Empecemos por este: | |
+| `option_intro_more_alone` | — | Tengo dudas en algunos de tus estudios. Empecemos por este: | |
+| `ask_option_outro` | Indica cómo elegir una opción (número o nombre exacto). | Dime cuál necesitas: con el número, con el nombre o con lo que lo distingue. Si son varios, escríbelos como te quede más cómodo (con comas, «y» o «todos»). | |
 | `ask_unresolved` | Pide el nombre exacto o una foto cuando algo no se pudo identificar. No promete a nadie. | No pude identificar con certeza algunos estudios. Escribe el nombre exacto de cada uno o envía una foto de tu receta. Si no los encuentras, escribe LISTO y dejaré tu solicitud en revisión. | |
 | `choose_invalid` | La opción respondida no existe en la lista. | No encontré esa opción. Responde con el número de la lista o escribe el nombre exacto del estudio. | |
 | `not_done` | El paciente dijo que aún falta algo: se espera lo que envíe. | De acuerdo, sigo esperando. Envíame los estudios que faltan y después responde SÍ o escribe LISTO. | |

@@ -3,7 +3,7 @@ chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 echo ========================================
-echo  PlusMedik V2 - Servidor local (start.bat)
+echo PlusMedik V2 - Servidor local start bat
 echo ========================================
 echo.
 
@@ -77,7 +77,7 @@ if errorlevel 1 (
 :: Mostrar instrucciones de ngrok
 echo.
 echo ========================================
-echo  PASO MANUAL (otra terminal):
+echo PASO MANUAL otra terminal
 echo ========================================
 echo  ngrok http 3000 --domain hungerless-uncrystalled-andy.ngrok-free.dev
 echo.

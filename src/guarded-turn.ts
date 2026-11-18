@@ -64,6 +64,8 @@ export interface TurnsConfig {
   // AGENTE CONVERSACIONAL ÚNICO (apagado si falta; ver src/agent/pilot.ts): mientras el interruptor de emergencia de la base esté encendido, decide la respuesta de un lote de
   // texto; la ENVÍA esta misma máquina (lease, reserva, pausa humana, un envío por lote, tope). Si no puede o no debe responder, responde la ruta de siempre.
   agentPilot?: AgentPilot;
+  // Modelo OpenAI del agente conversacional (para llamada directa sin pasar por el piloto).
+  agentModel?: import("./agent/openai.js").AgentModel;
   // Métodos de pago IGNORADOS (ausente = como siempre): un mensaje que solo trata de cómo pagar no se atiende (ni se reclama), y en los demás se quitan las frases de pago antes de entenderlos. Ver src/payment-talk.ts.
   ignorePayment?: boolean;
   // Quién responde a los mensajes que no son imágenes. Sin manejador, ese tipo de mensaje ni se reclama ni se responde.

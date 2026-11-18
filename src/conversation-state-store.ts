@@ -111,12 +111,12 @@ const RESOLVED_NO_QUOTE: ReadonlySet<string> = new Set([QUOTE_TEXTS.cancelled, Q
 // ¿La respuesta del agente atendió de verdad lo pedido? (un mensaje de varias partes cuenta como respuesta si alguna parte NO es un texto fijo)
 export function replyQualityOf(reply: { body: string; result: string; generic?: boolean; quality?: ReplyQuality }): ReplyQuality {
   // El productor que SABE qué hizo (el agente del piloto: respondió, cotizó o aplazó) lo dice; el resto se deduce del texto fijo.
-  if (reply.quality) return reply.quality;
-  if (reply.result === "technical_issue") return "TECHNICAL";
-  if (reply.result === "quoted") return "QUOTE";
-  const parts = reply.body.split(/\n{2,}/).map((part) => part.trim()).filter((part) => part !== "");
-  const free = parts.filter((part) => !GENERIC_TEXTS.has(part) && !BLOCKED_TEXTS.has(part));
-  if (free.length === 0) return parts.some((part) => BLOCKED_TEXTS.has(part)) ? "BLOCKED" : "GENERIC";
+    if (reply.quality) return reply.quality;
+    if (reply.result === "technical_issue") return "TECHNICAL";
+    if (reply.result === "quoted") return "QUOTE";
+    const parts = reply.body.split(/\n{2,}/).map((part) => part.trim()).filter((part) => part !== "");
+    const free = parts.filter((part) => !GENERIC_TEXTS.has(part) && !BLOCKED_TEXTS.has(part));
+    if (free.length === 0) return parts.some((part) => BLOCKED_TEXTS.has(part)) ? "BLOCKED" : "GENERIC";
   if (reply.result === "no_quote" && !parts.every((part) => RESOLVED_NO_QUOTE.has(part))) return "UNRESOLVED";
   if (reply.generic === true && free.length === parts.length && parts.length === 1) return "GENERIC";
   return "ANSWER";

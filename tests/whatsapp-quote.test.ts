@@ -6,7 +6,7 @@ import type { SimpleReading } from "../src/ai.js";
 import type { CatalogStudy } from "../src/types.js";
 import {
   clipForLog, detectImageMime, emojiFor, extractIncomingImages, formatBs, formatQuoteMessage, handleImageMessage, isAllowedPhone, maskPhone, LOG_TEXT_MAX, MAX_IMAGE_BYTES, NO_QUOTE_MESSAGE,
-  TECHNICAL_ISSUE_MESSAGE, verifyWebhookSignature, type IncomingImage, type QuoteDeps
+  QUOTE_FOOTER, TECHNICAL_ISSUE_MESSAGE, verifyWebhookSignature, type IncomingImage, type QuoteDeps
 } from "../src/whatsapp-quote.js";
 import { GET, POST } from "../api/kapso/webhook.js";
 
@@ -118,8 +118,8 @@ describe("mensaje al paciente", () => {
     expect(partial).toContain("Total de los estudios cotizados: Bs 360");
     expect(partial).toContain("⚠️ *Cotización parcial:*");
     expect(partial).toContain("no necesariamente toda la solicitud");
-    expect(partial.endsWith("Respóndenos por este chat para continuar. 😊")).toBe(true);
-    expect(formatQuoteMessage(quote)).not.toContain("⚠️ *Cotización parcial:*");
+    expect(partial.endsWith(QUOTE_FOOTER)).toBe(true);
+    expect(formatQuoteMessage(quote)).not.toContain("*Cotización parcial:*");
   });
 
   it("lista cada estudio con su precio y el total de los estudios cotizados, sin afirmar que cubre toda la receta", () => {
@@ -220,7 +220,7 @@ describe("handleImageMessage", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]!.body).toContain("ANTI-LAMBDA IGM — Bs 180");
     expect(sent[0]!.body).toContain("Total de los estudios cotizados: Bs 180");
-    expect(sent[0]!.body).toContain("⚠️ *Cotización parcial:*");
+    expect(sent[0]!.body).toContain("*Cotización parcial:*");
     expect(sent[0]!.body).toContain("Este importe incluye solo los estudios listados");
     expect(sent[0]!.body).not.toContain("ANTI-LAMBDA IGG —");
     expect(sent[0]!.body).not.toContain("Bs 370");
@@ -234,7 +234,7 @@ describe("handleImageMessage", () => {
     const body = sent[0]!.body;
     for (const name of ["HEMOGRAMA COMPLETO", "CREATININA", "UREA", "GLUCOSA"]) expect(body).toContain(name);
     expect(body).toContain("Bs 125");
-    expect(body).toContain("⚠️ *Cotización parcial:*");
+    expect(body).toContain("*Cotización parcial:*");
     expect(body).toContain("Este importe incluye solo los estudios listados");
     expect(body).toContain("Para intentar completar la cotización");
     expect(body).not.toContain("Estudio que no existe");

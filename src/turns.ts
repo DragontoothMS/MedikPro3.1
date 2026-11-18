@@ -14,6 +14,14 @@ import { classifyText, DRAFT_TEXTS } from "./text-handler.js";
 import { joinStudyFragments } from "./text-fragments.js";
 import { deferClosing, mergeContactTurns, mergeProduced, type BatchUnit } from "./turn-batch.js";
 import { imageProducer, maskPhone, TECHNICAL_ISSUE_MESSAGE, type IncomingImage, type QuoteDeps } from "./whatsapp-quote.js";
+import { runAgentTurn } from "./agent/pipeline.js";
+import { prepareAgentTurn, buildAgentTools } from "./agent/shadow.js";
+import { resolveAgentSettings } from "./agent/openai.js";
+import { retrieveVerifiedContext, type RetrievedContext } from "./agent/retrieval.js";
+import { answerFromBusinessData } from "./business-answers.js";
+import { createConversationReader, createSupabaseConversationStore } from "./conversation-state-store.js";
+import { createRecentProvider } from "./agent/pilot.js";
+import type { AgentModel, ObservedTurn, Utterance, Capabilities } from "./agent/contracts.js";
 
 // Turnos conversacionales (G2.0): cualquier mensaje ENTRANTE de un contacto (imagen, texto u otro) se procesa con la misma máquina de seguridad que ya protegía a las
 // imágenes (guarded-turn.ts: claim con lease, reserva de envío, comprobación de pausa humana, un envío incierto jamás se reenvía) más lo que necesitan varios
@@ -261,17 +269,206 @@ export function conversationProducer(turn: IncomingTurn, handler: (turn: Incomin
   };
 }
 
+// Productor para textos usando el agente conversacional (LLM) directamente.
+// Llama al modelo OpenAI con runAgentTurn sin pasar por las restricciones del piloto.
+function agentConversationalProducer(turn: IncomingTurn, deps: QuoteDeps): TurnProducer {
+  let agentModel = deps.turns?.agentModel;
+  const crm = deps.turns?.crmHandoff;
+  const textHandlers = deps.turns?.handlers;
+  return async (ctx) => {
+    // Si el modelo no llegó por turns, intentar recuperarlo desde variables de entorno
+    if (!agentModel && process.env.PLUSMEDIK_LLM_CONVERSATION?.trim().toLowerCase() === "on") {
+      const settings = resolveAgentSettings(process.env, deps.log);
+      if (settings?.model) {
+        agentModel = settings.model;
+        deps.log("agent_model_recovered", { messageId: turn.messageId });
+      }
+    }
+    const startMs = Date.now();
+    deps.log("agent_turn_received", {
+      messageId: turn.messageId,
+      contactKey: deps.turns?.contactKeyFor(turn.from),
+      turnKind: turn.kind,
+      agentModelAvailable: !!agentModel,
+    });
+
+    if (!agentModel) {
+      deps.log("agent_fallback_triggered", {
+        messageId: turn.messageId,
+        reason: "NO_AGENT_MODEL",
+        durationMs: Date.now() - startMs,
+      });
+      if (textHandlers?.text) {
+        return conversationProducer(turn, (t, c) => textHandlers.text!.call(textHandlers, t, c), deps)(ctx);
+      }
+      return { kind: "none" };
+    }
+    deps.log("agent_model_available", { messageId: turn.messageId });
+    deps.log("agent_producer_selected", { messageId: turn.messageId, producer: "agent_conversational" });
+
+    try {
+      const contactKey = deps.turns?.contactKeyFor(turn.from);
+      // Contexto completo para el agente: conocimiento de negocio, memoria de cotizaciones y mensajes recientes.
+      const answer = async (question: string) => answerFromBusinessData(question);
+      const reader = deps.turns?.convState
+        ? createConversationReader({ store: createSupabaseConversationStore() })
+        : undefined;
+      const recent = createRecentProvider({});
+      deps.log("agent_prepare_started", { messageId: turn.messageId });
+      const prepared = await prepareAgentTurn({
+        loadCatalog: deps.loadCatalog,
+        answer,
+        reader,
+        contactKeyFor: deps.turns!.contactKeyFor,
+        recent,
+        capabilities: { handoff: false, quote: true },
+      }, turn.from, [{ messageId: turn.messageId, kind: "TEXT" as const, text: turn.text!, ...(turn.timestamp ? { timestamp: turn.timestamp } : {}) }]);
+
+      if (prepared.kind !== "ready") {
+        deps.log("agent_prepare_skipped", {
+          messageId: turn.messageId,
+          reason: prepared.reason,
+          durationMs: Date.now() - startMs,
+        });
+        if (textHandlers?.text) {
+          return conversationProducer(turn, (t, c) => textHandlers.text!.call(textHandlers, t, c), deps)(ctx);
+        }
+        return { kind: "none" };
+      }
+      deps.log("agent_prepare_completed", {
+        messageId: turn.messageId,
+        utteranceCount: prepared.utterances.length,
+        durationMs: Date.now() - startMs,
+      });
+
+      // ── Recuperación determinista de datos antes del modelo ──
+      let retrievedContext: RetrievedContext | undefined;
+      try {
+        deps.log("agent_retrieval_started", { messageId: turn.messageId });
+        retrievedContext = await retrieveVerifiedContext(turn.text!, {
+          loadCatalog: deps.loadCatalog,
+          answerFromBusinessData: (question: string) => answerFromBusinessData(question),
+        });
+        deps.log("agent_retrieval_completed", {
+          messageId: turn.messageId,
+          status: retrievedContext.retrievalStatus,
+          intent: retrievedContext.intent,
+          sources: retrievedContext.sources,
+          studyCount: retrievedContext.studies.length,
+          businessInfoCount: retrievedContext.businessInfo?.length ?? 0,
+        });
+      } catch (error) {
+        deps.log("agent_retrieval_failed", {
+          messageId: turn.messageId,
+          error: error instanceof Error ? error.message : "UNKNOWN_ERROR",
+          durationMs: Date.now() - startMs,
+        });
+      }
+
+      // Inyectar contexto verificado en las utterances antes del modelo
+      const utterancesWithContext = [...prepared.utterances];
+      if (retrievedContext?.contextText && utterancesWithContext.length > 0) {
+        const lastIdx = utterancesWithContext.length - 1;
+        utterancesWithContext[lastIdx] = {
+          ...utterancesWithContext[lastIdx],
+          text: `${utterancesWithContext[lastIdx]!.text}${retrievedContext.contextText}`,
+        };
+      }
+
+      deps.log("agent_llm_started", { messageId: turn.messageId });
+      const decision = await runAgentTurn(
+        { model: agentModel, tools: prepared.tools, cancelled: () => false },
+        { utterances: utterancesWithContext, recent: prepared.recent, capabilities: { handoff: false, quote: true }, now: new Date() }
+      );
+      deps.log("agent_llm_completed", {
+        messageId: turn.messageId,
+        status: decision.status,
+        durationMs: Date.now() - startMs,
+      });
+
+      deps.log("agent_decision_status", {
+        messageId: turn.messageId,
+        status: decision.status,
+        hasReply: Boolean(decision.reply),
+        replyChars: decision.reply?.length,
+      });
+
+      if (decision.status === "VERIFIED" && decision.reply) {
+        deps.log("agent_reply_produced", {
+          messageId: turn.messageId,
+          producer: "llm",
+          chars: decision.reply.length,
+          durationMs: Date.now() - startMs,
+        });
+        deps.log("agent_direct_reply", { from: maskPhone(turn.from), status: decision.status, chars: decision.reply.length });
+        return {
+          kind: "reply",
+          body: decision.reply,
+          result: "conversation",
+          processingStatus: "COMPLETED",
+          stale: "NEWER_TURN",
+        };
+      }
+
+      // No VERIFIED o sin reply: registrar motivo explícito del fallback
+      deps.log("agent_fallback_triggered", {
+        messageId: turn.messageId,
+        reason: decision.status === "SILENT" ? "COURTESY_ONLY" : `DECISION_${decision.status}`,
+        durationMs: Date.now() - startMs,
+      });
+    } catch (error) {
+      deps.log("agent_llm_failed", {
+        messageId: turn.messageId,
+        error: error instanceof Error ? error.message : "UNKNOWN_ERROR",
+        durationMs: Date.now() - startMs,
+      });
+      deps.log("agent_direct_error", { from: maskPhone(turn.from) });
+    }
+
+    // Fallback al handler de textos fijos (recepcionista)
+    deps.log("agent_fallback_triggered", {
+      messageId: turn.messageId,
+      reason: "LLM_UNAVAILABLE_OR_REJECTED",
+      durationMs: Date.now() - startMs,
+    });
+    if (textHandlers?.text) {
+      return conversationProducer(turn, (t, c) => textHandlers.text!.call(textHandlers, t, c), deps)(ctx);
+    }
+    return { kind: "none" };
+  };
+}
+
 // Qué turnos se procesan con la configuración actual: las imágenes siempre; un texto u otro tipo solo si hay un manejador para ese tipo.
 export function producerFor(turn: IncomingTurn, deps: QuoteDeps): TurnProducer | undefined {
   const handlers = deps.turns?.handlers;
+  deps.log("agent_producer_for_entered", {
+    turnKind: turn.kind,
+    agentModelAvailable: Boolean(deps.turns?.agentModel),
+    textHandlerAvailable: Boolean(handlers?.text),
+    turnsKeys: deps.turns ? Object.keys(deps.turns).sort().join(",") : "turns_undefined"
+  });
   // Audios: ya transcritos son TEXT y siguen la ruta de texto; uno sin escuchar o que falló solo produce su aviso (nunca contenido inventado). Sin el procesamiento de audios no se procesa.
   if (turn.kind === "AUDIO" || turn.audioFailure) return deps.turns?.audio && handlers?.text ? audioFailureProducer(turn, deps) : undefined;
   const sessions = deps.turns?.quoteSessions;
   // Con sesiones, la foto no se cotiza sola: se agrega a la sesión del contacto (la cotización sale con «listo»). Solo si hay manejador de texto (si no, nadie podría cerrar la sesión).
   if (turn.kind === "IMAGE") return sessions && handlers?.text && !deps.turns?.instantPhotoQuotes ? sessionImageProducer(imageOf(turn), deps, sessions) : imageProducer(imageOf(turn), deps);
   const handler = turn.kind === "TEXT" ? handlers?.text : handlers?.other;
-  if (!handler) return undefined;
-  const conversation = () => conversationProducer(turn, (t, c) => handler.call(handlers, t, c), deps);
+  const agentModelActive = Boolean(deps.turns?.agentModel) || process.env.PLUSMEDIK_LLM_CONVERSATION?.trim().toLowerCase() === "on";
+  if (!handler && !agentModelActive) return undefined;
+  const selected = turn.kind === "TEXT" && agentModelActive ? "agent_conversational" : "text_handler";
+  deps.log("agent_producer_selection", {
+    turnKind: turn.kind,
+    selected,
+    agentModelFromTurns: Boolean(deps.turns?.agentModel),
+    agentModelFromEnv: process.env.PLUSMEDIK_LLM_CONVERSATION?.trim().toLowerCase() === "on"
+  });
+  const conversation = () => {
+    // Agente conversacional (LLM) para textos: prioridad sobre los textos fijos del recepcionista
+    if (turn.kind === "TEXT" && agentModelActive) {
+      return agentConversationalProducer(turn, deps);
+    }
+    return conversationProducer(turn, (t, c) => handler!.call(handlers, t, c), deps);
+  };
   // G6.0: ¿hubo una cotización entregada hace poco? Solo se consulta cuando alguien escribe «listo» sin nada abierto (para tomarlo como acuse) y reutiliza la misma memoria de la última cotización de G4.1.
   const recentQuote = async (ctx: Parameters<TurnProducer>[0]): Promise<boolean> => {
     let recent = false;
